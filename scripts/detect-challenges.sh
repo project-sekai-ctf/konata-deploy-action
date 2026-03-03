@@ -9,14 +9,21 @@ if [ -z "$BASE_REF" ]; then
     BASE_REF="origin/$GITHUB_BASE_REF"
   elif [ -n "${GITHUB_EVENT_BEFORE:-}" ] && [ "$GITHUB_EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
     BASE_REF="$GITHUB_EVENT_BEFORE"
-  else
-    BASE_REF="HEAD~1"
   fi
+fi
+
+if [ -z "$BASE_REF" ]; then
+  echo "No base ref available (initial push?) — syncing all challenges"
+  echo "should_sync=true" >> "$GITHUB_OUTPUT"
+  echo "only_flags=" >> "$GITHUB_OUTPUT"
+  echo "global_changed=true" >> "$GITHUB_OUTPUT"
+  echo "challenges=" >> "$GITHUB_OUTPUT"
+  exit 0
 fi
 
 echo "Base ref: $BASE_REF"
 
-CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD -- "$DEPLOY_DIR" 2>/dev/null || true)
+CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD -- "$DEPLOY_DIR")
 
 if [ -z "$CHANGED_FILES" ]; then
   echo "No files changed under $DEPLOY_DIR"
