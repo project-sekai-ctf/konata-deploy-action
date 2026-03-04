@@ -13,7 +13,11 @@ if [ -z "$BASE_REF" ]; then
 fi
 
 if [ -n "$BASE_REF" ]; then
-  if ! git cat-file -e "$BASE_REF" 2>/dev/null; then
+  if [[ "$BASE_REF" == -* ]]; then
+    echo "::error::Invalid base ref: $BASE_REF"
+    exit 1
+  fi
+  if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
     echo "Base ref $BASE_REF not in shallow clone, fetching..."
     git fetch --depth=1 origin "$BASE_REF" 2>/dev/null || BASE_REF=""
   fi
