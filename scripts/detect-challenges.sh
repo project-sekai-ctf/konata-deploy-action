@@ -71,7 +71,7 @@ if [ "$GLOBAL_CHANGED" = "true" ]; then
   exit 0
 fi
 
-declare -A CHALLENGE_DIRS
+declare -A CHALLENGE_DIRS=()
 while IFS= read -r file; do
   dir=$(dirname "$file")
 
