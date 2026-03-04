@@ -10,10 +10,6 @@ inputs:
     description: 'Base ref to diff against (auto-detected from event if omitted)'
     required: false
     default: ''
-  python-version:
-    description: 'Python version to use'
-    required: false
-    default: '3.14'
   konata-version:
     description: 'Konata package specifier for pip install'
     required: false
@@ -36,8 +32,6 @@ runs:
   steps:
     - name: Install uv
       uses: astral-sh/setup-uv@v7
-      with:
-        python-version: ${{ inputs.python-version }}
 
     - name: Detect changed challenges
       id: detect
@@ -55,5 +49,4 @@ runs:
         DEPLOY_DIRECTORY: ${{ inputs.deploy-directory }}
         ONLY_FLAGS: ${{ steps.detect.outputs.only_flags }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-        UV_PYTHON: ${{ inputs.python-version }}
-      run: uvx --refresh --python "$UV_PYTHON" --from "${{ inputs.konata-version }}" kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
+      run: uvx --refresh --python-preference only-system --from "${{ inputs.konata-version }}" kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
