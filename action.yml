@@ -34,16 +34,10 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
       with:
         python-version: ${{ inputs.python-version }}
-
-    - name: Install konata
-      shell: bash
-      env:
-        KONATA_VERSION: ${{ inputs.konata-version }}
-      run: pip install "$KONATA_VERSION"
 
     - name: Detect changed challenges
       id: detect
@@ -61,4 +55,5 @@ runs:
         DEPLOY_DIRECTORY: ${{ inputs.deploy-directory }}
         ONLY_FLAGS: ${{ steps.detect.outputs.only_flags }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-      run: python -m kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
+        UV_PYTHON: ${{ inputs.python-version }}
+      run: uvx --python "$UV_PYTHON" --from "${{ inputs.konata-version }}" kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
