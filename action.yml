@@ -56,4 +56,4 @@ runs:
         ONLY_FLAGS: ${{ steps.detect.outputs.only_flags }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
         UV_PYTHON: ${{ inputs.python-version }}
-      run: uvx --python "$UV_PYTHON" --from "${{ inputs.konata-version }}" kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
+      run: uvx --refresh --python "$UV_PYTHON" --from "${{ inputs.konata-version }}" kona sync -d "$DEPLOY_DIRECTORY" $ONLY_FLAGS $EXTRA_ARGS
