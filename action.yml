@@ -51,6 +51,7 @@ runs:
       env:
         INPUT_DEPLOY_DIRECTORY: ${{ inputs.deploy-directory }}
         INPUT_BASE_REF: ${{ inputs.base-ref }}
+        GITHUB_EVENT_BEFORE: ${{ github.event.before }}
       run: bash ${{ github.action_path }}/scripts/detect-challenges.sh
 
     - name: Sync challenges

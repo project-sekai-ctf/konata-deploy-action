@@ -12,6 +12,13 @@ if [ -z "$BASE_REF" ]; then
   fi
 fi
 
+if [ -n "$BASE_REF" ]; then
+  if ! git cat-file -e "$BASE_REF" 2>/dev/null; then
+    echo "Base ref $BASE_REF not in shallow clone, fetching..."
+    git fetch --depth=1 origin "$BASE_REF" 2>/dev/null || BASE_REF=""
+  fi
+fi
+
 if [ -z "$BASE_REF" ]; then
   echo "No base ref available (initial push?) — syncing all challenges"
   echo "should_sync=true" >> "$GITHUB_OUTPUT"
