@@ -1,0 +1,208 @@
+name: 'Konata Detect'
+description: 'Detect changed challenges and output a JSON matrix for parallel sync'
+
+inputs:
+  deploy-directory:
+    description: 'Root directory containing kona config and challenges'
+    required: false
+    default: '.'
+  base-ref:
+    description: 'Base ref to diff against (auto-detected from event if omitted)'
+    required: false
+    default: ''
+
+outputs:
+  matrix:
+    description: 'JSON array of challenge paths (relative to deploy-directory) for strategy.matrix.challenge'
+    value: ${{ steps.detect.outputs.matrix }}
+  should-sync:
+    description: 'Whether any challenges need syncing'
+    value: ${{ steps.detect.outputs.should_sync }}
+  changed-challenges:
+    description: 'Space-separated list of changed challenge paths (relative to deploy-directory)'
+    value: ${{ steps.detect.outputs.challenges }}
+  global-config-changed:
+    description: 'Whether a root kona config file changed'
+    value: ${{ steps.detect.outputs.global_changed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect changed challenges
+      id: detect
+      shell: bash
+      env:
+        INPUT_DEPLOY_DIRECTORY: ${{ inputs.deploy-directory }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
+        GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+      run: |
+        set -euo pipefail
+
+        DEPLOY_DIR="${INPUT_DEPLOY_DIRECTORY:-.}"
+        DEPLOY_DIR="${DEPLOY_DIR%/}"
+        [ -z "$DEPLOY_DIR" ] && DEPLOY_DIR="."
+        [ "$DEPLOY_DIR" = "./" ] && DEPLOY_DIR="."
+
+        BASE_REF="${INPUT_BASE_REF}"
+        if [ -z "$BASE_REF" ]; then
+          if [ -n "${GITHUB_BASE_REF:-}" ]; then
+            BASE_REF="origin/$GITHUB_BASE_REF"
+          elif [ -n "${GITHUB_EVENT_BEFORE:-}" ] && [ "$GITHUB_EVENT_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            BASE_REF="$GITHUB_EVENT_BEFORE"
+          fi
+        fi
+
+        if [ -n "$BASE_REF" ]; then
+          if [[ "$BASE_REF" == -* ]]; then
+            echo "::error::Invalid base ref: $BASE_REF"
+            exit 1
+          fi
+          if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+            echo "Base ref $BASE_REF not in shallow clone, fetching..."
+            if [[ "$BASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+              if [ -n "${GITHUB_REF_NAME:-}" ]; then
+                git fetch --depth=200 origin "$GITHUB_REF_NAME" 2>/dev/null || true
+              else
+                git fetch --deepen=200 origin 2>/dev/null || true
+              fi
+
+              if ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+                BASE_REF=""
+              fi
+            else
+              FETCH_REF="$BASE_REF"
+              if [[ "$FETCH_REF" == origin/* ]]; then
+                FETCH_REF="${FETCH_REF#origin/}"
+              fi
+              if [[ "$FETCH_REF" == refs/heads/* ]]; then
+                FETCH_REF="${FETCH_REF#refs/heads/}"
+              fi
+
+              if ! git fetch --depth=1 origin "$FETCH_REF" 2>/dev/null; then
+                BASE_REF=""
+              elif ! git cat-file -e "${BASE_REF}^{commit}" 2>/dev/null; then
+                BASE_REF=""
+              fi
+            fi
+          fi
+        fi
+
+        # --- helpers ---
+        normalize_challenge_dir() {
+          local dir="$1"
+
+          if [ "$DEPLOY_DIR" = "." ]; then
+            [ "$dir" = "." ] && return 1
+            printf '%s\n' "$dir"
+            return 0
+          fi
+
+          [ "$dir" = "$DEPLOY_DIR" ] && return 1
+          if [[ "$dir" == "$DEPLOY_DIR/"* ]]; then
+            printf '%s\n' "${dir#"$DEPLOY_DIR"/}"
+          else
+            printf '%s\n' "$dir"
+          fi
+        }
+
+        discover_all_challenges() {
+          local raw_dir challenge_dir
+          declare -A seen=()
+          while IFS= read -r -d '' kona_file; do
+            raw_dir="$(dirname "$kona_file")"
+            if challenge_dir="$(normalize_challenge_dir "$raw_dir")"; then
+              seen["$challenge_dir"]=1
+            fi
+          done < <(find "$DEPLOY_DIR" -maxdepth 10 \( -name 'kona.toml' -o -name 'kona.yaml' -o -name 'kona.yml' \) -not -path '*/.*' -print0 2>/dev/null)
+          printf '%s\n' "${!seen[@]}"
+        }
+
+        emit_results() {
+          local should_sync="$1" global_changed="$2"
+          shift 2
+          local dirs=("$@")
+          local json_array="[]"
+          if [ ${#dirs[@]} -gt 0 ]; then
+            json_array=$(printf '%s\n' "${dirs[@]}" | jq -R . | jq -sc .)
+          fi
+          echo "should_sync=$should_sync" >> "$GITHUB_OUTPUT"
+          echo "global_changed=$global_changed" >> "$GITHUB_OUTPUT"
+          echo "challenges=${dirs[*]:-}" >> "$GITHUB_OUTPUT"
+          echo "matrix=$json_array" >> "$GITHUB_OUTPUT"
+        }
+
+        # --- no base ref: sync everything ---
+        if [ -z "$BASE_REF" ]; then
+          echo "No base ref available (initial push?) — syncing all challenges"
+          mapfile -t ALL_DIRS < <(discover_all_challenges)
+          if [ ${#ALL_DIRS[@]} -eq 0 ]; then
+            echo "No challenge directories discovered under $DEPLOY_DIR"
+            emit_results false false
+          else
+            emit_results true true "${ALL_DIRS[@]}"
+          fi
+          exit 0
+        fi
+
+        echo "Base ref: $BASE_REF"
+        CHANGED_FILES=$(git diff --name-only "$BASE_REF" HEAD -- "$DEPLOY_DIR")
+
+        if [ -z "$CHANGED_FILES" ]; then
+          echo "No files changed under $DEPLOY_DIR"
+          emit_results false false
+          exit 0
+        fi
+
+        echo "Changed files:"
+        echo "$CHANGED_FILES"
+
+        # --- check for global config change ---
+        GLOBAL_CHANGED=false
+        while IFS= read -r file; do
+          rel="${file#"$DEPLOY_DIR"/}"
+          [ "$DEPLOY_DIR" = "." ] && rel="$file"
+          basename=$(basename "$rel")
+          dir=$(dirname "$rel")
+          if [ "$dir" = "." ] && [[ "$basename" =~ ^kona\.(toml|yaml|yml)$ ]]; then
+            GLOBAL_CHANGED=true
+            break
+          fi
+        done <<< "$CHANGED_FILES"
+
+        if [ "$GLOBAL_CHANGED" = "true" ]; then
+          echo "Global kona config changed — syncing all challenges"
+          mapfile -t ALL_DIRS < <(discover_all_challenges)
+          if [ ${#ALL_DIRS[@]} -eq 0 ]; then
+            echo "No challenge directories discovered under $DEPLOY_DIR"
+            emit_results false true
+          else
+            emit_results true true "${ALL_DIRS[@]}"
+          fi
+          exit 0
+        fi
+
+        # --- find affected challenge directories ---
+        declare -A CHALLENGE_DIRS=()
+        challenge_dir=""
+        while IFS= read -r file; do
+          dir=$(dirname "$file")
+          while [ "$dir" != "." ] && [ "$dir" != "$DEPLOY_DIR" ]; do
+            if [ -f "$dir/kona.toml" ] || [ -f "$dir/kona.yaml" ] || [ -f "$dir/kona.yml" ]; then
+              if challenge_dir="$(normalize_challenge_dir "$dir")"; then
+                CHALLENGE_DIRS["$challenge_dir"]=1
+              fi
+              break
+            fi
+            dir=$(dirname "$dir")
+          done
+        done <<< "$CHANGED_FILES"
+
+        if [ ${#CHALLENGE_DIRS[@]} -eq 0 ]; then
+          echo "No challenge directories affected"
+          emit_results false false
+          exit 0
+        fi
+
+        DIRS=("${!CHALLENGE_DIRS[@]}")
+        echo "Challenges to sync: ${DIRS[*]}"
+        emit_results true false "${DIRS[@]}"

@@ -1,0 +1,39 @@
+name: 'Konata Sync'
+description: 'Sync a single challenge directory (use in matrix job after detect)'
+
+inputs:
+  deploy-directory:
+    description: 'Root directory containing kona config and challenges'
+    required: false
+    default: '.'
+  challenge-path:
+    description: 'Path to the challenge directory (relative to deploy-directory)'
+    required: true
+  konata-version:
+    description: 'Konata package specifier for pip install'
+    required: false
+    default: 'konata'
+  extra-args:
+    description: 'Extra arguments to pass to kona sync'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: false
+
+    - name: Sync challenge
+      shell: bash
+      env:
+        DOCKER_BUILDKIT: '1'
+      run: >-
+        uvx --refresh --python-preference only-system
+        --from "${{ inputs.konata-version }}"
+        kona sync
+        -d "${{ inputs.deploy-directory }}"
+        --challenge-path "${{ inputs.challenge-path }}"
+        ${{ inputs.extra-args }}
