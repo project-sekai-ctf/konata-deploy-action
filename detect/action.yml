@@ -90,6 +90,7 @@ runs:
         # --- helpers ---
         normalize_challenge_dir() {
           local dir="$1"
+          dir="${dir#./}"
 
           if [ "$DEPLOY_DIR" = "." ]; then
             [ "$dir" = "." ] && return 1
